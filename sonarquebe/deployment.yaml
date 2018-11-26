@@ -1,0 +1,105 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: sonarqube
+  labels:
+    app: sonarqube
+spec:
+  selector:
+    app: sonarqube
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 9000
+  type: ClusterIP
+---
+apiVersion: apps/v1beta2
+kind: Deployment
+metadata:
+  name: sonarqube
+  labels:
+    app: sonarqube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sonarqube
+  template:
+    metadata:
+      labels:
+        app: sonarqube
+    spec:
+      containers:
+      - name: sonarqube
+        image: sonarqube
+        args: 
+        - -Dsonar.ce.javaOpts=-Xmx2048m
+        - -Dsonar.web.javaOpts=-Xmx2048m
+        #args:
+        #- -Dsonar.web.context=/sonar
+        env:
+        - name: SONARQUBE_JDBC_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: pgdb-user-pass
+              key: username
+        - name: SONARQUBE_JDBC_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: pgdb-user-pass
+              key: password
+        - name: SONARQUBE_JDBC_URL
+          value: jdbc:postgresql://192.168.50.195:5432/sonar
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            #memory: "300Mi"
+            cpu: "100m"
+          limits:
+            memory: "5Gi"
+            cpu: "1.5"
+        ports:
+        - containerPort: 9000
+        volumeMounts:
+        - name: sonarqube-data
+          mountPath: /opt/sonarqube/data
+        - name: sonarqube-extensions
+          mountPath: /opt/sonarqube/extensions
+        - name: sonar-config
+          mountPath: /tmp/conf
+          #subPath: sonar.properties
+        lifecycle:
+          postStart:
+            exec:
+              command: ["cp", "/tmp/conf/sonar.properties", "/opt/sonarqube/conf/"]
+      volumes:
+      - name: sonarqube-data
+        persistentVolumeClaim:
+          claimName: sonarqube-data
+      - name: sonarqube-extensions
+        persistentVolumeClaim:
+          claimName: sonarqube-extensions
+      - name: sonar-config
+        configMap:
+          name: sonar-config
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: sonarqube
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/proxy-body-size: 100m
+spec:
+  #tls:
+  #- hosts:
+  #  - sonarqube.cluster.dfwsgroup.cn
+  #  secretName: sonarqube-tls
+  rules:
+  - host: sonarqube.istio.dfwsgroup.cn
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: sonarqube
+          servicePort: 80
